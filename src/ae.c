@@ -282,6 +282,9 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
      * events to be processed ASAP when this happens: the idea is that
      * processing events earlier is less dangerous than delaying them
      * indefinitely, and practice suggests it is. */
+    // 若系统重设了时间
+    // 将所有时间事件的触发时间设为立刻触发
+    // 所有的时间事件都会提前执行
     if (now < eventLoop->lastTime) {
         te = eventLoop->timeEventHead;
         while(te) {
@@ -296,12 +299,14 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
     while(te) {
         long now_sec, now_ms;
         long long id;
-
+        
+        // 跳过无效时间事件
         if (te->id > maxId) {
             te = te->next;
             continue;
         }
         aeGetTime(&now_sec, &now_ms);
+        // 执行满足触发时间的时间事件
         if (now_sec > te->when_sec ||
             (now_sec == te->when_sec && now_ms >= te->when_ms))
         {
@@ -360,13 +365,25 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
      * file events to process as long as we want to process time
      * events, in order to sleep until the next time event is ready
      * to fire. */
+    // 存在监听的文件描述符
     if (eventLoop->maxfd != -1 ||
         ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT))) {
         int j;
         aeTimeEvent *shortest = NULL;
         struct timeval tv, *tvp;
 
+        /**
+         * 计算I/O多路复用的等待时间
+         * 1. 如果存在时间事件没有处理
+         *  1. 还有一段时间才能触发, 在这段时间内等待文件事件发生
+         *  2. 已经超过等待的时间, 检查是否有文件事件发生, 没有直接返回
+         * 2. 没有时间事件
+         *  1. 如果是非阻塞状态, 检查后直接返回,不阻塞等待
+         *  2. 一直阻塞直到有文件事件发生
+         */
+        // 存在时间事件标志, 并且不是非阻塞状态
         if (flags & AE_TIME_EVENTS && !(flags & AE_DONT_WAIT))
+            // 找出最近要执行的时间事件
             shortest = aeSearchNearestTimer(eventLoop);
         if (shortest) {
             long now_sec, now_ms;
@@ -407,10 +424,12 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 	    /* note the fe->mask & mask & ... code: maybe an already processed
              * event removed an element that fired and we still didn't
              * processed, so we check if the event is still valid. */
+            // 先处理文件读事件
             if (fe->mask & mask & AE_READABLE) {
                 rfired = 1;
                 fe->rfileProc(eventLoop,fd,fe->clientData,mask);
             }
+            // 再处理文件写事件
             if (fe->mask & mask & AE_WRITABLE) {
                 if (!rfired || fe->wfileProc != fe->rfileProc)
                     fe->wfileProc(eventLoop,fd,fe->clientData,mask);
@@ -418,6 +437,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             processed++;
         }
     }
+    // 最后处理时间事件
     /* Check time events */
     if (flags & AE_TIME_EVENTS)
         processed += processTimeEvents(eventLoop);
