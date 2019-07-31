@@ -338,14 +338,18 @@ float zmalloc_get_fragmentation_ratio(size_t rss) {
 size_t zmalloc_get_smap_bytes_by_field(char *field) {
     char line[1024];
     size_t bytes = 0;
+    // 默认会打开/proc/[pid]/smaps文件
     FILE *fp = fopen("/proc/self/smaps","r");
     int flen = strlen(field);
 
     if (!fp) return 0;
+    // 每次读取一行进行处理
     while(fgets(line,sizeof(line),fp) != NULL) {
+        // 找出目标字段
         if (strncmp(line,field,flen) == 0) {
             char *p = strchr(line,'k');
             if (p) {
+                // 使用了一个小技巧, 截断kB, 去除相关数值
                 *p = '\0';
                 bytes += strtol(line+flen,NULL,10) * 1024;
             }
